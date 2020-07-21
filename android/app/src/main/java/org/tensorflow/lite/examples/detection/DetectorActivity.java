@@ -52,9 +52,12 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 
   // Configuration values for the prepackaged SSD model.
   private static final int TF_OD_API_INPUT_SIZE = 300;
-  private static final boolean TF_OD_API_IS_QUANTIZED = true;
-  private static final String TF_OD_API_MODEL_FILE = "detect.tflite";
-  private static final String TF_OD_API_LABELS_FILE = "file:///android_asset/labelmap.txt";
+//  private static final boolean TF_OD_API_IS_QUANTIZED = true;
+  private static final boolean TF_OD_API_IS_QUANTIZED = false;
+//  private static final String TF_OD_API_MODEL_FILE = "detect.tflite";
+  private static final String TF_OD_API_MODEL_FILE = "hope_sih_v1.tflite";
+//  private static final String TF_OD_API_LABELS_FILE = "file:///android_asset/labelmap.txt";
+  private static final String TF_OD_API_LABELS_FILE = "file:///android_asset/labelmap1.txt";
   private static final DetectorMode MODE = DetectorMode.TF_OD_API;
   // Minimum detection confidence to track a detection.
   private static final float MINIMUM_CONFIDENCE_TF_OD_API = 0.5f;
@@ -83,7 +86,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 
   private BorderedText borderedText;
 
-  public static int flag = 0;
+//  public static int flag = 0;
   public static String message = null;
 
   @Override
@@ -209,15 +212,12 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 
                 cropToFrameTransform.mapRect(location);
 
-                if (result.getTitle().equals("person")) {
-//                  System.out.println(flag);
-                  stopService(new Intent(getBaseContext(), ServiceMqtt.class));
+                if (result.getTitle().equals("Person")) {
                   System.out.println("function called");
-                  message = "Hunter spotted";
+                  message = "person";
                   MqttActivity mqttActivity = new MqttActivity(getApplicationContext(), message);
                   mqttActivity.setPriority(Thread.MAX_PRIORITY);
                   mqttActivity.start();
-//                    flag = 1;
 
                 }
 
@@ -225,18 +225,6 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
                 mappedRecognitions.add(result);
               }
             }
-
-//            if (flag == 1) {
-//              if (!mappedRecognitions.stream().anyMatch(mr -> mr.getTitle() == "person")) {
-//                flag = 0;
-//                System.out.println("flag changed");
-//                message = "Hunter disappeared";
-//                MqttActivity mqttActivity = new MqttActivity(getApplicationContext(), message);
-//                mqttActivity.setPriority(Thread.MAX_PRIORITY);
-//                mqttActivity.start();
-//                startService(new Intent(getBaseContext(), ServiceMqtt.class));
-//              }
-//            }
 
             tracker.trackResults(mappedRecognitions, currTimestamp);
             trackingOverlay.postInvalidate();

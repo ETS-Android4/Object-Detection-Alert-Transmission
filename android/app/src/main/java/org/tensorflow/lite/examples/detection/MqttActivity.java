@@ -1,16 +1,9 @@
 package org.tensorflow.lite.examples.detection;
 
-import android.app.IntentService;
 import android.content.Context;
-import android.content.Intent;
-import android.os.AsyncTask;
 import android.util.Log;
-import android.widget.Toast;
-
-import androidx.annotation.Nullable;
 
 import org.eclipse.paho.android.service.MqttAndroidClient;
-import org.eclipse.paho.android.service.MqttService;
 import org.eclipse.paho.client.mqttv3.IMqttActionListener;
 import org.eclipse.paho.client.mqttv3.IMqttToken;
 import org.eclipse.paho.client.mqttv3.MqttClient;
@@ -19,61 +12,114 @@ import org.eclipse.paho.client.mqttv3.MqttMessage;
 
 import java.io.UnsupportedEncodingException;
 
-public class MqttActivity extends Thread {
+import static org.tensorflow.lite.examples.detection.CameraActivity.camera_alert_id;
+import static org.tensorflow.lite.examples.detection.CameraActivity.camera_alert_latitude;
+import static org.tensorflow.lite.examples.detection.CameraActivity.camera_alert_longitude;
+import static org.tensorflow.lite.examples.detection.CameraActivity.latitude;
+import static org.tensorflow.lite.examples.detection.CameraActivity.longitude;
 
-    public final static String ipAddress = "192.168.0.101";
+public class MqttActivity extends Thread {
+    public static final String TAG = "MqttActivity";
+
+    public final static String ipAddress = "192.168.0.104";
 
     private final String protocol = "tcp";
     private final String port = "1883";
     private final String url = protocol + "://" + ipAddress + ":" + port;
 
-    private static final String TAG = "MainActivity";
     private final String clientId = MqttClient.generateClientId();
     private Context context;
 
-    private final String topic = "forest";
+    private final String camera_id = "c-234";
+
+    // hunter detection alerts will be published on this topic
+    private final String hunter_topic = "forest/hunter";
+
+    // animal sightings will be published here based on animal
+    private final String elephant_topic = "forest/animal/elephant";
+    private final String pig_topic = "forest/animal/pig";
+    private final String monkey_topic = "forest/animal/monkey";
+    private final String civet_topic = "forest/animal/civet";
+    private final String deer_topic = "forest/animal/deer";
+    private final String camera_topic = "forest/camera-alert";
+
+    // message payloads which will be published on various topics
+    private final String hunter_payload = camera_id+"/"+latitude+"/"+longitude;
+    private final String animal_payload = camera_id+"/"+latitude+"/"+longitude;
+    private final String camera_payload = camera_alert_id+"/"+camera_alert_latitude+"/"+camera_alert_longitude;
+
+    private static MqttAndroidClient client;
+    private static IMqttToken token;
+
     private String payload;
 
-    public MqttActivity (Context context, String message) {
-        payload = message;
+    public MqttActivity (Context context, String payload) {
+        this.payload = payload;
         this.context = context;
     }
 
     public void run () {
-        System.out.println("Inside run");
-        final MqttAndroidClient client =
-                new MqttAndroidClient(context, url, clientId);
+        Log.d(TAG, "inside run");
+//        Log.d(TAG, token.getClient().toString());
+//        Log.d(TAG, payload);
+        client = new MqttAndroidClient(context, url, clientId);
         try {
-            System.out.println("Inside try");
-            IMqttToken token = client.connect();
-            token.setActionCallback(new IMqttActionListener() {
-                @Override
-                public void onSuccess(IMqttToken asyncActionToken) {
-                    // We are connected
-                    System.out.println("Inside success");
-                    byte[] encodedPayload = new byte[0];
-                    try {
-                        encodedPayload = payload.getBytes("UTF-8");
-                        MqttMessage message = new MqttMessage(encodedPayload);
-                        client.publish(topic, message);
-                        System.out.println("message published");
-                    } catch (NullPointerException | UnsupportedEncodingException | MqttException e) {
-                        System.out.println("error occured");
-                        e.printStackTrace();
-                    }
-                }
-
-                @Override
-                public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
-                    // Something went wrong e.g. connection timeout or firewall problems
-                    System.out.println("Inside failure");
-                    Log.d(TAG, String.valueOf(exception));
-                }
-            });
+            token = client.connect();
         } catch (MqttException e) {
-            System.out.println("Inside catch");
             e.printStackTrace();
         }
+        token.setActionCallback(new IMqttActionListener() {
+            @Override
+            public void onSuccess(IMqttToken asyncActionToken) {
+                // We are connected
+                Log.d(TAG, "inside success");
+                byte[] encodedPayload = new byte[0];
+                MqttMessage message;
+                try {
+                    if (payload.equals("person")) {
+                        System.out.println("hunter msg");
+                        encodedPayload = hunter_payload.getBytes("UTF-8");
+                        message = new MqttMessage(encodedPayload);
+                        client.publish(hunter_topic, message);
+//                        client.publish(hunter_topic, encodedPayload, 1, false);
+                    } else if (payload.equals("camera")) {
+                        encodedPayload = camera_payload.getBytes("UTF-8");
+                        message = new MqttMessage(encodedPayload);
+                        client.publish(camera_topic, message);
+                    } else {
+                        encodedPayload = animal_payload.getBytes("UTF-8");
+                        message = new MqttMessage(encodedPayload);
+                        if (payload.equals("elephant")) {
+                            client.publish(elephant_topic, message);
+                        } else if (payload.equals("monkey")) {
+                            client.publish(monkey_topic, message);
+                        } else if (payload.equals("civet")) {
+                            client.publish(civet_topic, message);
+                        } else if (payload.equals("pig")) {
+                            client.publish(pig_topic, message);
+                        } else if (payload.equals("deer")) {
+                            client.publish(deer_topic, message);
+                        }
+                    }
+                    System.out.println("message published");
+                } catch (NullPointerException | UnsupportedEncodingException | MqttException e) {
+                    System.out.println("error occured");
+                    e.printStackTrace();
+                }
+                try {
+                    client.disconnect();
+                } catch (MqttException e) {
+                    e.printStackTrace();
+                }
+            }
+
+            @Override
+            public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
+                System.out.println("Inside failure");
+                Log.d(TAG, String.valueOf(exception));
+            }
+        });
+
     }
 
 }

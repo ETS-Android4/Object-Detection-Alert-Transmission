@@ -28,6 +28,8 @@ import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.params.StreamConfigurationMap;
+import android.location.LocationListener;
+import android.location.LocationManager;
 import android.media.Image;
 import android.media.Image.Plane;
 import android.media.ImageReader;
@@ -37,11 +39,17 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.os.Looper;
 import android.os.Trace;
+
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.SwitchCompat;
 import androidx.appcompat.widget.Toolbar;
+import androidx.core.app.ActivityCompat;
+
+import android.util.Log;
 import android.util.Size;
 import android.view.Surface;
 import android.view.View;
@@ -52,13 +60,26 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import com.google.android.gms.location.LocationCallback;
+import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationResult;
+import com.google.android.gms.location.LocationServices;
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
+import com.google.firebase.FirebaseApp;
+import com.google.firebase.firestore.DocumentSnapshot;
+import com.google.firebase.firestore.EventListener;
+import com.google.firebase.firestore.FirebaseFirestore;
+import com.google.firebase.firestore.FirebaseFirestoreException;
+
 import java.nio.ByteBuffer;
+import java.util.Map;
+
 import org.tensorflow.lite.examples.detection.env.ImageUtils;
 import org.tensorflow.lite.examples.detection.env.Logger;
 
 public abstract class CameraActivity extends AppCompatActivity
-    implements OnImageAvailableListener,
+        implements OnImageAvailableListener,
         Camera.PreviewCallback,
         CompoundButton.OnCheckedChangeListener,
         View.OnClickListener {
@@ -67,6 +88,8 @@ public abstract class CameraActivity extends AppCompatActivity
   private static final int PERMISSIONS_REQUEST = 1;
 
   private static final String PERMISSION_CAMERA = Manifest.permission.CAMERA;
+  private static final String PERMISSION_LOCATION = Manifest.permission.ACCESS_FINE_LOCATION;
+  private static final String TAG = "CameraActivity";
   protected int previewWidth = 0;
   protected int previewHeight = 0;
   private boolean debug = false;
@@ -93,6 +116,16 @@ public abstract class CameraActivity extends AppCompatActivity
   private BroadcastReceiver receiver;
   private WifiManager manager;
   private IntentFilter filter;
+  public MqttActivity mqttActivity;
+
+  public static double latitude;
+  public static double longitude;
+
+  public static String camera_alert_id;
+  public static double camera_alert_latitude;
+  public static double camera_alert_longitude;
+
+  FirebaseFirestore db;
 
   @Override
   protected void onCreate(final Bundle savedInstanceState) {
@@ -105,16 +138,21 @@ public abstract class CameraActivity extends AppCompatActivity
     setSupportActionBar(toolbar);
     getSupportActionBar().setDisplayShowTitleEnabled(false);
 
-    startService(new Intent(getBaseContext(), ServiceMqtt.class));
+    FirebaseApp.initializeApp(this);
 
     if (hasPermission()) {
       setFragment();
+      getCurrentLocation();
     } else {
       requestPermission();
     }
 
+    startService(new Intent(getBaseContext(), ServiceMqtt.class));
+    startService(new Intent(getBaseContext(), CameraMqttService.class));
+
     threadsTextView = findViewById(R.id.threads);
     plusImageView = findViewById(R.id.plus);
+    System.out.println("action callback");
     minusImageView = findViewById(R.id.minus);
     apiSwitchCompat = findViewById(R.id.api_info_switch);
     bottomSheetLayout = findViewById(R.id.bottom_sheet_layout);
@@ -124,50 +162,49 @@ public abstract class CameraActivity extends AppCompatActivity
 
     ViewTreeObserver vto = gestureLayout.getViewTreeObserver();
     vto.addOnGlobalLayoutListener(
-        new ViewTreeObserver.OnGlobalLayoutListener() {
-          @Override
-          public void onGlobalLayout() {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN) {
-              gestureLayout.getViewTreeObserver().removeGlobalOnLayoutListener(this);
-            } else {
-              gestureLayout.getViewTreeObserver().removeOnGlobalLayoutListener(this);
-            }
-            //                int width = bottomSheetLayout.getMeasuredWidth();
-            int height = gestureLayout.getMeasuredHeight();
+            new ViewTreeObserver.OnGlobalLayoutListener() {
+              @Override
+              public void onGlobalLayout() {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN) {
+                  gestureLayout.getViewTreeObserver().removeGlobalOnLayoutListener(this);
+                } else {
+                  gestureLayout.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                }
+                //                int width = bottomSheetLayout.getMeasuredWidth();
+                int height = gestureLayout.getMeasuredHeight();
 
-            sheetBehavior.setPeekHeight(height);
-          }
-        });
+                sheetBehavior.setPeekHeight(height);
+              }
+            });
     sheetBehavior.setHideable(false);
 
     sheetBehavior.setBottomSheetCallback(
-        new BottomSheetBehavior.BottomSheetCallback() {
-          @Override
-          public void onStateChanged(@NonNull View bottomSheet, int newState) {
-            switch (newState) {
-              case BottomSheetBehavior.STATE_HIDDEN:
-                break;
-              case BottomSheetBehavior.STATE_EXPANDED:
-                {
-                  bottomSheetArrowImageView.setImageResource(R.drawable.icn_chevron_down);
+            new BottomSheetBehavior.BottomSheetCallback() {
+              @Override
+              public void onStateChanged(@NonNull View bottomSheet, int newState) {
+                switch (newState) {
+                  case BottomSheetBehavior.STATE_HIDDEN:
+                    break;
+                  case BottomSheetBehavior.STATE_EXPANDED: {
+                    bottomSheetArrowImageView.setImageResource(R.drawable.icn_chevron_down);
+                  }
+                  break;
+                  case BottomSheetBehavior.STATE_COLLAPSED: {
+                    bottomSheetArrowImageView.setImageResource(R.drawable.icn_chevron_up);
+                  }
+                  break;
+                  case BottomSheetBehavior.STATE_DRAGGING:
+                    break;
+                  case BottomSheetBehavior.STATE_SETTLING:
+                    bottomSheetArrowImageView.setImageResource(R.drawable.icn_chevron_up);
+                    break;
                 }
-                break;
-              case BottomSheetBehavior.STATE_COLLAPSED:
-                {
-                  bottomSheetArrowImageView.setImageResource(R.drawable.icn_chevron_up);
-                }
-                break;
-              case BottomSheetBehavior.STATE_DRAGGING:
-                break;
-              case BottomSheetBehavior.STATE_SETTLING:
-                bottomSheetArrowImageView.setImageResource(R.drawable.icn_chevron_up);
-                break;
-            }
-          }
+              }
 
-          @Override
-          public void onSlide(@NonNull View bottomSheet, float slideOffset) {}
-        });
+              @Override
+              public void onSlide(@NonNull View bottomSheet, float slideOffset) {
+              }
+            });
 
     frameValueTextView = findViewById(R.id.frame_info);
     cropValueTextView = findViewById(R.id.crop_info);
@@ -177,6 +214,61 @@ public abstract class CameraActivity extends AppCompatActivity
 
     plusImageView.setOnClickListener(this);
     minusImageView.setOnClickListener(this);
+
+    db = FirebaseFirestore.getInstance();
+    db.collection("camera").document("status").addSnapshotListener(new EventListener<DocumentSnapshot>() {
+      @Override
+      public void onEvent(@Nullable DocumentSnapshot documentSnapshot, @Nullable FirebaseFirestoreException e) {
+        if (e != null) {
+          Log.d(TAG, e.toString());
+          return;
+        }
+        if (documentSnapshot.exists()) {
+          Map<String, Object> camera_id = documentSnapshot.getData();
+          camera_alert_id = camera_id.get("camera_id").toString();
+          camera_alert_latitude = Double.parseDouble(camera_id.get("latitude").toString());
+          camera_alert_longitude = Double.parseDouble(camera_id.get("longitude").toString());
+          MqttActivity activity = new MqttActivity(getApplicationContext(), "camera");
+          activity.setPriority(Thread.MAX_PRIORITY);
+          activity.start();
+        }
+      }
+    });
+  }
+
+  private void getCurrentLocation() {
+    System.out.println("GRANTED PERMISSION !! HIP-HIP HURRAH !! SO HAPPY");
+
+    LocationRequest locationRequest = new LocationRequest();
+    locationRequest.setInterval(10000);
+    locationRequest.setFastestInterval(3000);
+    locationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
+
+    if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+      // TODO: Consider calling
+      //    ActivityCompat#requestPermissions
+      // here to request the missing permissions, and then overriding
+      //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
+      //                                          int[] grantResults)
+      // to handle the case where the user grants the permission. See the documentation
+      // for ActivityCompat#requestPermissions for more details.
+      return;
+    }
+    LocationServices.getFusedLocationProviderClient(CameraActivity.this)
+            .requestLocationUpdates(locationRequest, new LocationCallback() {
+
+              @Override
+              public void onLocationResult(LocationResult locationResult) {
+                super.onLocationResult(locationResult);
+                LocationServices.getFusedLocationProviderClient(CameraActivity.this)
+                        .removeLocationUpdates(this);
+                if (locationResult != null && locationResult.getLocations().size() > 0) {
+                  int latestLocationIndex = locationResult.getLocations().size() - 1;
+                  latitude = locationResult.getLocations().get(latestLocationIndex).getLatitude();
+                  longitude = locationResult.getLocations().get(latestLocationIndex).getLongitude();
+                }
+              }
+            }, Looper.getMainLooper());
   }
 
   protected int[] getRgbBytes() {
@@ -192,7 +284,9 @@ public abstract class CameraActivity extends AppCompatActivity
     return yuvBytes[0];
   }
 
-  /** Callback for android.hardware.Camera API */
+  /**
+   * Callback for android.hardware.Camera API
+   */
   @Override
   public void onPreviewFrame(final byte[] bytes, final Camera camera) {
     if (isProcessingFrame) {
@@ -219,25 +313,27 @@ public abstract class CameraActivity extends AppCompatActivity
     yRowStride = previewWidth;
 
     imageConverter =
-        new Runnable() {
-          @Override
-          public void run() {
-            ImageUtils.convertYUV420SPToARGB8888(bytes, previewWidth, previewHeight, rgbBytes);
-          }
-        };
+            new Runnable() {
+              @Override
+              public void run() {
+                ImageUtils.convertYUV420SPToARGB8888(bytes, previewWidth, previewHeight, rgbBytes);
+              }
+            };
 
     postInferenceCallback =
-        new Runnable() {
-          @Override
-          public void run() {
-            camera.addCallbackBuffer(bytes);
-            isProcessingFrame = false;
-          }
-        };
+            new Runnable() {
+              @Override
+              public void run() {
+                camera.addCallbackBuffer(bytes);
+                isProcessingFrame = false;
+              }
+            };
     processImage();
   }
 
-  /** Callback for Camera2 API */
+  /**
+   * Callback for Camera2 API
+   */
   @Override
   public void onImageAvailable(final ImageReader reader) {
     // We need wait until we have some size from onPreviewSizeChosen
@@ -267,30 +363,30 @@ public abstract class CameraActivity extends AppCompatActivity
       final int uvPixelStride = planes[1].getPixelStride();
 
       imageConverter =
-          new Runnable() {
-            @Override
-            public void run() {
-              ImageUtils.convertYUV420ToARGB8888(
-                  yuvBytes[0],
-                  yuvBytes[1],
-                  yuvBytes[2],
-                  previewWidth,
-                  previewHeight,
-                  yRowStride,
-                  uvRowStride,
-                  uvPixelStride,
-                  rgbBytes);
-            }
-          };
+              new Runnable() {
+                @Override
+                public void run() {
+                  ImageUtils.convertYUV420ToARGB8888(
+                          yuvBytes[0],
+                          yuvBytes[1],
+                          yuvBytes[2],
+                          previewWidth,
+                          previewHeight,
+                          yRowStride,
+                          uvRowStride,
+                          uvPixelStride,
+                          rgbBytes);
+                }
+              };
 
       postInferenceCallback =
-          new Runnable() {
-            @Override
-            public void run() {
-              image.close();
-              isProcessingFrame = false;
-            }
-          };
+              new Runnable() {
+                @Override
+                public void run() {
+                  image.close();
+                  isProcessingFrame = false;
+                }
+              };
 
       processImage();
     } catch (final Exception e) {
@@ -312,6 +408,7 @@ public abstract class CameraActivity extends AppCompatActivity
     LOGGER.d("onResume " + this);
     super.onResume();
 
+//    mqttActivity.establishMqttConnection();
     handlerThread = new HandlerThread("inference");
     handlerThread.start();
     handler = new Handler(handlerThread.getLooper());
@@ -329,6 +426,7 @@ public abstract class CameraActivity extends AppCompatActivity
     } catch (final InterruptedException e) {
       LOGGER.e(e, "Exception!");
     }
+//    mqttActivity.closeMqttConnection();
 
     super.onPause();
   }
@@ -336,8 +434,10 @@ public abstract class CameraActivity extends AppCompatActivity
   @Override
   public synchronized void onStop() {
     LOGGER.d("onStop " + this);
+//    mqttActivity.closeMqttConnection();
     super.onStop();
   }
+
 
   @Override
   public synchronized void onDestroy() {
@@ -358,6 +458,7 @@ public abstract class CameraActivity extends AppCompatActivity
     if (requestCode == PERMISSIONS_REQUEST) {
       if (allPermissionsGranted(grantResults)) {
         setFragment();
+        getCurrentLocation();
       } else {
         requestPermission();
       }
@@ -375,7 +476,8 @@ public abstract class CameraActivity extends AppCompatActivity
 
   private boolean hasPermission() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-      return checkSelfPermission(PERMISSION_CAMERA) == PackageManager.PERMISSION_GRANTED;
+      return checkSelfPermission(PERMISSION_CAMERA) == PackageManager.PERMISSION_GRANTED &&
+              checkSelfPermission(PERMISSION_LOCATION) == PackageManager.PERMISSION_GRANTED;
     } else {
       return true;
     }
@@ -390,7 +492,14 @@ public abstract class CameraActivity extends AppCompatActivity
                 Toast.LENGTH_LONG)
             .show();
       }
-      requestPermissions(new String[] {PERMISSION_CAMERA}, PERMISSIONS_REQUEST);
+      if (shouldShowRequestPermissionRationale(PERMISSION_LOCATION)) {
+        Toast.makeText(
+                CameraActivity.this,
+                "Location permission is required for this demo",
+                Toast.LENGTH_LONG)
+                .show();
+      }
+      requestPermissions(new String[] {PERMISSION_CAMERA, PERMISSION_LOCATION}, PERMISSIONS_REQUEST);
     }
   }
 

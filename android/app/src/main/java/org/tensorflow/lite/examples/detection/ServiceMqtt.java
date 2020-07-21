@@ -2,6 +2,7 @@ package org.tensorflow.lite.examples.detection;
 
 import android.app.Service;
 import android.content.Intent;
+import android.os.AsyncTask;
 import android.os.IBinder;
 import android.util.Log;
 import android.widget.Toast;
@@ -16,24 +17,45 @@ import org.eclipse.paho.client.mqttv3.MqttCallback;
 import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
+import org.json.JSONException;
+import org.json.JSONObject;
 
+import java.io.BufferedOutputStream;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+
+import static android.location.Location.distanceBetween;
 
 public class ServiceMqtt extends Service {
+    private static final String TAG = "ServiceMqtt";
 
     private final String protocol = "tcp";
     private final String port = "1883";
     private final String url = protocol + "://" + MqttActivity.ipAddress + ":" + port;
 
-    private static final String TAG = "ServiceMqtt";
     private final String clientId = MqttClient.generateClientId();
     private final MqttAndroidClient client =
             new MqttAndroidClient(this, url, clientId);
 
-    private final String topic = "forest";
-    private final int qos = 1;
+    // these are the topics which are subscribed to by camera
+    private final String[] topics = {
+      "forest/hunter",
+      "forest/camera/#",
+      "forest/animal/#",
+      "forest/forest-officer/#",
+    };
+    private final int[] qos = {1,1,1,1};
 
-    private boolean funcExecuted = false;
+    private HashMap<String, String[]> officer_coordinates = new HashMap<>();
 
     @Nullable
     @Override
@@ -53,7 +75,7 @@ public class ServiceMqtt extends Service {
                     // We are connected
                     Log.d(TAG, "onSuccess");
                     try {
-                        IMqttToken subToken = client.subscribe(topic, qos);
+                        IMqttToken subToken = client.subscribe(topics, qos);
                         subToken.setActionCallback(new IMqttActionListener() {
                             @Override
                             public void onSuccess(IMqttToken asyncActionToken) {
@@ -94,7 +116,24 @@ public class ServiceMqtt extends Service {
             @Override
             public void messageArrived(String topic, MqttMessage message) throws Exception {
                 Log.d(TAG, "message arrived");
+                System.out.println(topic);
                 System.out.println(message.toString());
+
+                CallAPI postRequest = new CallAPI();
+                String[] values = topic.split("/");
+                if (topic.contains("hunter")) {
+                    if (checkDistance()) {
+                        postRequest.execute("hunter", message.toString());
+                    }
+                } else if (topic.contains("animal")) {
+                    postRequest.execute(values[2], message.toString());
+                } else if (topic.contains("camera")) {
+                    postRequest.execute("camera", values[2]);
+                } else if (topic.contains("forest-officer")) {
+                    String[] coordinates = message.toString().split(",");
+                    officer_coordinates.put(values[2], coordinates);
+                }
+
             }
 
             @Override
@@ -110,7 +149,7 @@ public class ServiceMqtt extends Service {
     public void onDestroy() {
 
         try {
-            IMqttToken unsubToken = client.unsubscribe(topic);
+            IMqttToken unsubToken = client.unsubscribe(topics);
             unsubToken.setActionCallback(new IMqttActionListener() {
                 @Override
                 public void onSuccess(IMqttToken asyncActionToken) {
@@ -152,4 +191,95 @@ public class ServiceMqtt extends Service {
 
         super.onDestroy();
     }
+
+    private boolean checkDistance() {
+        System.out.println("distance function called");
+        for (Map.Entry mapElement : officer_coordinates.entrySet()) {
+            String[] coordinates = (String[]) mapElement.getValue();
+            double startlatitude = Double.parseDouble(coordinates[0]);
+            double startlongitude = Double.parseDouble(coordinates[1]);
+            double endlatitiude = CameraActivity.latitude;
+            double endlongitude = CameraActivity.longitude;
+            float[] results = new float[3];
+            distanceBetween(startlatitude, startlongitude, endlatitiude, endlongitude, results);
+            if (results[0] <= 1.0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private class CallAPI extends AsyncTask<String, String, String> {
+
+        public CallAPI(){
+            //set context variables if required
+        }
+
+        @Override
+        protected void onPreExecute() {
+            super.onPreExecute();
+        }
+
+        @Override
+        protected String doInBackground(String... params) {
+            Log.d(TAG, "post request function called");
+
+            String urlString = "https://dc9bc4f9ffb146208f636af8c3d1432a.m.pipedream.net"; // URL to call
+            JSONObject data = new JSONObject();
+            if (params[0] == "camera") {
+                try {
+                    data.put("type", params[0]);
+                    data.put("value", params[1]);
+                } catch (JSONException e) {
+                    e.printStackTrace();
+                }
+            } else {
+                String[] values = params[1].split("/");
+                try {
+                    data.put("type", params[0]);
+                    data.put("value", values[0]);
+                    data.put("latitude", values[1]);
+                    data.put("longitude", values[2]);
+                } catch (JSONException e) {
+                    e.printStackTrace();
+                }
+            }
+            OutputStream out = null;
+
+            try {
+                URL url = new URL(urlString);
+                HttpURLConnection urlConnection = (HttpURLConnection) url.openConnection();
+                urlConnection.setRequestMethod("POST");
+                urlConnection.setRequestProperty("Content-Type", "application/json; utf-8");
+                urlConnection.setDoOutput(true);
+                out = new BufferedOutputStream(urlConnection.getOutputStream());
+
+                BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(out, "UTF-8"));
+                writer.write(data.toString());
+                writer.flush();
+                writer.close();
+                out.close();
+
+                Log.d(TAG, "message sent");
+
+                try(BufferedReader br = new BufferedReader(
+                        new InputStreamReader(urlConnection.getInputStream(), "utf-8"))) {
+                    StringBuilder response = new StringBuilder();
+                    String responseLine = null;
+                    while ((responseLine = br.readLine()) != null) {
+                        response.append(responseLine.trim());
+                    }
+                    System.out.println(response.toString());
+                }
+
+                urlConnection.connect();
+            } catch (Exception e) {
+                Log.d(TAG, "data sending failed");
+                System.out.println(e.getMessage());
+            }
+            return null;
+        }
+    }
 }
+
+
