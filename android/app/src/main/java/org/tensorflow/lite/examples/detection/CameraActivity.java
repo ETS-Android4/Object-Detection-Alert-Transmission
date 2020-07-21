@@ -66,11 +66,6 @@ import com.google.android.gms.location.LocationRequest;
 import com.google.android.gms.location.LocationResult;
 import com.google.android.gms.location.LocationServices;
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
-import com.google.firebase.FirebaseApp;
-import com.google.firebase.firestore.DocumentSnapshot;
-import com.google.firebase.firestore.EventListener;
-import com.google.firebase.firestore.FirebaseFirestore;
-import com.google.firebase.firestore.FirebaseFirestoreException;
 
 import java.nio.ByteBuffer;
 import java.util.Map;
@@ -125,8 +120,6 @@ public abstract class CameraActivity extends AppCompatActivity
   public static double camera_alert_latitude;
   public static double camera_alert_longitude;
 
-  FirebaseFirestore db;
-
   @Override
   protected void onCreate(final Bundle savedInstanceState) {
     LOGGER.d("onCreate " + this);
@@ -138,7 +131,6 @@ public abstract class CameraActivity extends AppCompatActivity
     setSupportActionBar(toolbar);
     getSupportActionBar().setDisplayShowTitleEnabled(false);
 
-    FirebaseApp.initializeApp(this);
 
     if (hasPermission()) {
       setFragment();
@@ -215,25 +207,24 @@ public abstract class CameraActivity extends AppCompatActivity
     plusImageView.setOnClickListener(this);
     minusImageView.setOnClickListener(this);
 
-    db = FirebaseFirestore.getInstance();
-    db.collection("camera").document("status").addSnapshotListener(new EventListener<DocumentSnapshot>() {
-      @Override
-      public void onEvent(@Nullable DocumentSnapshot documentSnapshot, @Nullable FirebaseFirestoreException e) {
-        if (e != null) {
-          Log.d(TAG, e.toString());
-          return;
-        }
-        if (documentSnapshot.exists()) {
-          Map<String, Object> camera_id = documentSnapshot.getData();
-          camera_alert_id = camera_id.get("camera_id").toString();
-          camera_alert_latitude = Double.parseDouble(camera_id.get("latitude").toString());
-          camera_alert_longitude = Double.parseDouble(camera_id.get("longitude").toString());
-          MqttActivity activity = new MqttActivity(getApplicationContext(), "camera");
-          activity.setPriority(Thread.MAX_PRIORITY);
-          activity.start();
-        }
-      }
-    });
+//    db.collection("camera").document("status").addSnapshotListener(new EventListener<DocumentSnapshot>() {
+//      @Override
+//      public void onEvent(@Nullable DocumentSnapshot documentSnapshot, @Nullable FirebaseFirestoreException e) {
+//        if (e != null) {
+//          Log.d(TAG, e.toString());
+//          return;
+//        }
+//        if (documentSnapshot.exists()) {
+//          Map<String, Object> camera_id = documentSnapshot.getData();
+//          camera_alert_id = camera_id.get("camera_id").toString();
+//          camera_alert_latitude = Double.parseDouble(camera_id.get("latitude").toString());
+//          camera_alert_longitude = Double.parseDouble(camera_id.get("longitude").toString());
+//          MqttActivity activity = new MqttActivity(getApplicationContext(), "camera");
+//          activity.setPriority(Thread.MAX_PRIORITY);
+//          activity.start();
+//        }
+//      }
+//    });
   }
 
   private void getCurrentLocation() {
