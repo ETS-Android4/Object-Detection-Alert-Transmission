@@ -61,11 +61,17 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.android.gms.location.LocationCallback;
 import com.google.android.gms.location.LocationRequest;
 import com.google.android.gms.location.LocationResult;
 import com.google.android.gms.location.LocationServices;
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
+import com.google.firebase.firestore.DocumentSnapshot;
+import com.google.firebase.firestore.EventListener;
+import com.google.firebase.firestore.FirebaseFirestore;
+import com.google.firebase.firestore.FirebaseFirestoreException;
 
 import java.nio.ByteBuffer;
 import java.util.Map;
@@ -116,9 +122,15 @@ public abstract class CameraActivity extends AppCompatActivity
   public static double latitude;
   public static double longitude;
 
+  FirebaseFirestore db = FirebaseFirestore.getInstance();
+
   public static String camera_alert_id;
   public static double camera_alert_latitude;
   public static double camera_alert_longitude;
+
+  ObjectMapper objectMapper = new ObjectMapper();
+  public static String animal_types;
+  public static String animal_locations;
 
   @Override
   protected void onCreate(final Bundle savedInstanceState) {
@@ -207,24 +219,6 @@ public abstract class CameraActivity extends AppCompatActivity
     plusImageView.setOnClickListener(this);
     minusImageView.setOnClickListener(this);
 
-//    db.collection("camera").document("status").addSnapshotListener(new EventListener<DocumentSnapshot>() {
-//      @Override
-//      public void onEvent(@Nullable DocumentSnapshot documentSnapshot, @Nullable FirebaseFirestoreException e) {
-//        if (e != null) {
-//          Log.d(TAG, e.toString());
-//          return;
-//        }
-//        if (documentSnapshot.exists()) {
-//          Map<String, Object> camera_id = documentSnapshot.getData();
-//          camera_alert_id = camera_id.get("camera_id").toString();
-//          camera_alert_latitude = Double.parseDouble(camera_id.get("latitude").toString());
-//          camera_alert_longitude = Double.parseDouble(camera_id.get("longitude").toString());
-//          MqttActivity activity = new MqttActivity(getApplicationContext(), "camera");
-//          activity.setPriority(Thread.MAX_PRIORITY);
-//          activity.start();
-//        }
-//      }
-//    });
   }
 
   private void getCurrentLocation() {
@@ -392,6 +386,72 @@ public abstract class CameraActivity extends AppCompatActivity
   public synchronized void onStart() {
     LOGGER.d("onStart " + this);
     super.onStart();
+
+    db.collection("camera").document("status").addSnapshotListener(new EventListener<DocumentSnapshot>() {
+      @Override
+      public void onEvent(@Nullable DocumentSnapshot documentSnapshot, @Nullable FirebaseFirestoreException e) {
+        if (e != null) {
+          Log.d(TAG, e.toString());
+          return;
+        }
+        if (documentSnapshot.exists()) {
+          Log.d(TAG, "method called");
+          Map<String, Object> camera_id = documentSnapshot.getData();
+          camera_alert_id = camera_id.get("camera_id").toString();
+          camera_alert_latitude = Double.parseDouble(camera_id.get("latitude").toString());
+          camera_alert_longitude = Double.parseDouble(camera_id.get("longitude").toString());
+          MqttActivity activity = new MqttActivity(getApplicationContext(), "camera");
+          activity.setPriority(Thread.MAX_PRIORITY);
+          activity.start();
+        }
+      }
+    });
+
+    db.collection("map_alert").document("animal").addSnapshotListener(new EventListener<DocumentSnapshot>() {
+      @Override
+      public void onEvent(@Nullable DocumentSnapshot documentSnapshot, @Nullable FirebaseFirestoreException error) {
+        if (error != null) {
+          Log.d(TAG, error.toString());
+          return;
+        }
+        if (documentSnapshot.exists()) {
+          Log.d(TAG, "animal document listener activated");
+          Map<String, Object> animalsDocument = documentSnapshot.getData();
+          try {
+            animal_types = objectMapper.writeValueAsString(animalsDocument);
+            System.out.println(animal_types);
+          } catch (JsonProcessingException e) {
+            e.printStackTrace();
+          }
+          MqttActivity activity = new MqttActivity(getApplicationContext(), "mapalert-animals");
+          activity.setPriority(Thread.MAX_PRIORITY);
+          activity.start();
+        }
+      }
+    });
+
+    db.collection("map_alert").document("location").addSnapshotListener(new EventListener<DocumentSnapshot>() {
+      @Override
+      public void onEvent(@Nullable DocumentSnapshot documentSnapshot, @Nullable FirebaseFirestoreException error) {
+        if (error != null) {
+          Log.d(TAG, error.toString());
+          return;
+        }
+        if (documentSnapshot.exists()) {
+          Log.d(TAG, "location document listener activated");
+          Map<String, Object> locationDocument = documentSnapshot.getData();
+          try {
+            animal_locations = objectMapper.writeValueAsString(locationDocument);
+            System.out.println(animal_locations);
+          } catch (JsonProcessingException e) {
+            e.printStackTrace();
+          }
+          MqttActivity activity = new MqttActivity(getApplicationContext(), "mapalert-locations");
+          activity.setPriority(Thread.MAX_PRIORITY);
+          activity.start();
+        }
+      }
+    });
   }
 
   @Override

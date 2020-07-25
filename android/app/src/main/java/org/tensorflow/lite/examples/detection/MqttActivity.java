@@ -12,6 +12,8 @@ import org.eclipse.paho.client.mqttv3.MqttMessage;
 
 import java.io.UnsupportedEncodingException;
 
+import static org.tensorflow.lite.examples.detection.CameraActivity.animal_locations;
+import static org.tensorflow.lite.examples.detection.CameraActivity.animal_types;
 import static org.tensorflow.lite.examples.detection.CameraActivity.camera_alert_id;
 import static org.tensorflow.lite.examples.detection.CameraActivity.camera_alert_latitude;
 import static org.tensorflow.lite.examples.detection.CameraActivity.camera_alert_longitude;
@@ -42,11 +44,15 @@ public class MqttActivity extends Thread {
     private final String civet_topic = "forest/animal/civet";
     private final String deer_topic = "forest/animal/deer";
     private final String camera_topic = "forest/camera-alert";
+    private final String map_alert_animals_topic = "forest/map-alert/animals";
+    private final String map_alert_locations_topic = "forest/map-alert/locations";
 
     // message payloads which will be published on various topics
     private final String hunter_payload = camera_id+"/"+latitude+"/"+longitude;
     private final String animal_payload = camera_id+"/"+latitude+"/"+longitude;
     private final String camera_payload = camera_alert_id+"/"+camera_alert_latitude+"/"+camera_alert_longitude;
+    private final String mapalert_animals_payload = animal_types;
+    private final String mapalert_locations_payload = animal_locations;
 
     private static MqttAndroidClient client;
     private static IMqttToken token;
@@ -86,6 +92,14 @@ public class MqttActivity extends Thread {
                         encodedPayload = camera_payload.getBytes("UTF-8");
                         message = new MqttMessage(encodedPayload);
                         client.publish(camera_topic, message);
+                    } else if (payload.equals("mapalert-animals")) {
+                        encodedPayload = mapalert_animals_payload.getBytes("UTF-8");
+                        message = new MqttMessage(encodedPayload);
+                        client.publish(map_alert_animals_topic, message);
+                    } else if (payload.equals("mapalert-locations")) {
+                        encodedPayload = mapalert_locations_payload.getBytes("UTF-8");
+                        message = new MqttMessage(encodedPayload);
+                        client.publish(map_alert_locations_topic, message);
                     } else {
                         encodedPayload = animal_payload.getBytes("UTF-8");
                         message = new MqttMessage(encodedPayload);
